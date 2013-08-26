@@ -10,87 +10,69 @@
 #-------------------------------------------------------------------------------
 import arcpy, os
 import datetime, time,string
+import sqlite3 as db
 
 class nmeamain:
-    def nmeaDict(self,nmeafile):
+    def nmeaDict(self,nmeafile,connectionObject):
+        nmeafile.seek(0)
+        for line in nmeafile:
+             linee=line.split(',')
+             if line[3:6]=='GGA' or line[3:6]=='GGA':
+                 cur=connectionObject.cursor()
+                 key=linee[1][:2]+':'+linee[1][2:4]+':'+linee[1][4:6]
+                 qu="""insert or ignore into nmea2GGA(utc,msl) values('"""+key+"""',0)"""
+##                 arcpy.AddError(qu)
+                 #QMessageBox.information(self.iface.mainWindow(), 'inff', qu)
+                 cur.execute(qu)
 
-            start=time.time()
-            self.nmeadict={}
-            nmeafile.seek(0)
+             if line[3:6]=='GLL':
+                 cur=connectionObject.cursor()
+                 key=linee[5][:2]+':'+linee[5][2:4]+':'+linee[5][4:6]
+                 qu="""insert or ignore into nmea2GGA(utc,msl) values('"""+key+"""',0)"""
+                 #QMessageBox.information(self.iface.mainWindow(), 'inff2', qu)
+                 cur.execute(qu)
+        connectionObject.commit()
 
-            for line in nmeafile:
-                 linee=line.split(',')
-                 if line[3:6]=='GGA' or line[3:6]=='RMC':
-                     self.nmeadict[linee[1]]=['',0,0,0,0,0,0,0,0,0,0,0,0]
-                 if line[3:6]=='GLL':
-                     self.nmeadict[linee[5]]=['',0,0,0,0,0,0,0,0,0,0,0,0]
-            nmeafile.seek(0)
-            for line in nmeafile:
-                if line.startswith('$'):
-                    try:
-                        parser={'GGA':self.par_gga,'RMC':self.par_rmc,'GLL':self.par_gll}[line[3:6]]
-                        parser(line)
-                    except:
-##                        arcpy.AddMessage('blad')
-                        continue
 
-            end=time.time()
 
-            nmeafile.close()
+        nmeafile.seek(0)
 
-            self.dates=[]
-            self.utc=[]
-            self.lat=[]
-            self.lon=[]
-            self.numSV=[]
-            self.hdop=[]
-            self.vdop=[]
-            self.pdop=[]
-            self.msl=[]
-            self.geoid=[]
-            self.speed=[]
-            self.fixstatus=[]
-            self.datastatus=[]
-            for keyy in self.nmeadict.keys():
-##                arcpy.AddMessage(self.nmeadict[keyy][0])
-                self.utc.append(self.nmeadict[keyy][0])
-                self.dates.append(datetime.datetime.strptime(self.nmeadict[keyy][0],'%H:%M:%S'))
-                self.numSV.append(float(self.nmeadict[keyy][3]))
-                try:    self.hdop.append(float(self.nmeadict[keyy][4]))
-                except:  self.hdop.append(0)
+        for line in nmeafile:
+            if line.startswith('$'):
+                try:
+                    parser={'GGA':self.par_gga,'RMC':self.par_rmc,'GLL':self.par_gll}[line[3:6]]
+                    query=parser(line)
+##                    QMessageBox.information(self.iface.mainWindow(), 'info', query)
+                    cursor=connectionObject.cursor()
+                    cursor.execute(query)
+                except:
+##                    arcpy.AddError("cos nie dziala")
+                    continue
+        connectionObject.commit()
 
-                self.lon.append(self.nmeadict[keyy][2])
-                self.lat.append(self.nmeadict[keyy][1])
-                self.vdop.append(float(self.nmeadict[keyy][5]))
-                self.pdop.append(float(self.nmeadict[keyy][6]))
-                try:    self.msl.append(float(self.nmeadict[keyy][7]))
-                except: self.msl.append(0)
-                try:    self.geoid.append(float(self.nmeadict[keyy][8]))
-                except: self.geoid.append(0)
-                self.speed.append(float(self.nmeadict[keyy][9]))
-                self.fixstatus.append(int(self.nmeadict[keyy][11]))
-                datastatus=0
-                if self.nmeadict[keyy][12]=='A':    datastatus=1
-                self.datastatus.append(datastatus)
+
 
     def addLayer(self):
-            sciezka="D://GIS//schemat_MSL.shp"
-            desc=arcpy.Describe(sciezka)
             ref=arcpy.SpatialReference((4326))
-##            ref=desc.spatialReference.exporttostring()
             output=arcpy.GetParameterAsText(1)
             arcpy.CreateFeatureclass_management(os.path.dirname(output), os.path.basename(output),"POINT",'','DISABLED','DISABLED',ref)
             arcpy.AddField_management(output,"msl","FLOAT")
-
-##            cursor=arcpy.da.InsertCursor(os.getcwd()+"//warstwaNMEA.shp",("ID","SHAPE@XY"))
             cursor=arcpy.da.InsertCursor(output,("ID","SHAPE@XY","msl"))
 
-            for a, lat in enumerate(self.lat):
-                cursor.insertRow((a,(self.lon[a],lat),self.msl[a]))
+            cur=self.connectionObject.cursor()
+            qu="""SELECT lat,lon,msl from nmea2GGA"""
+            cur.execute(qu)
+            fetched=cur.fetchall()
+            a=0
+            for f in fetched:
+##                arcpy.AddError(f)
+                cursor.insertRow((a,(f[1],f[0]),f[2]))
+                a+=1
 
 
 
     def par_gga(self,line):
+##        arcpy.AddError("jkestem w par_gga")
         data=[]
         data=line.split(',')
         key=data[1]
@@ -103,17 +85,12 @@ class nmeamain:
         msl=data[9]
         geoid=data[11]
         fixstatus=data[6]
-        self.nmeadict[key][0]=utc
-##        arcpy.AddMessage(utc)
-        self.nmeadict[key][1]=latt
-        self.nmeadict[key][2]=lonn
-        self.nmeadict[key][3]=numsv
-        self.nmeadict[key][4]=hdop
-        self.nmeadict[key][7]=msl
-        self.nmeadict[key][8]=geoid
-        self.nmeadict[key][11]=fixstatus
+        query="""update nmea2GGA set lat="""+str(latt)+""",lon="""+str(lonn)+""",fixstatus="""+str(fixstatus)+""",numsv="""+str(numsv)+""",hdop="""+str(hdop)+""",msl="""+str(msl)+""",geoid="""+str(geoid)+""" where utc='"""+utc+"""';"""
+        return query
+
 
     def par_rmc(self,line):
+##        arcpy.AddError("jkestem w par_rmc")
         data=[]
         data=line.split(',')
         key=data[1]
@@ -123,14 +100,12 @@ class nmeamain:
         lonn=float(data[5][:(ind-2)])+float(data[5][(ind-2):])/60
         speed=data[7]
         datastatus=data[2]
-        self.nmeadict[key][0]=utc
-##        arcpy.AddMessage(utc)
-        self.nmeadict[key][1]=latt
-        self.nmeadict[key][2]=lonn
-        self.nmeadict[key][9]=speed
-        self.nmeadict[key][12]=datastatus
+
+        query="""update nmea2GGA set lat="""+str(latt)+""",lon="""+str(lonn)+""",speed="""+str(speed)+""",datastatus='"""+str(datastatus)+"""' where utc='"""+utc+"""';"""
+        return query
 
     def par_gll(self,line):
+##        arcpy.AddError("jkestem w par_gll")
         data=[]
         data=line.split(',')
         key=data[5]
@@ -139,11 +114,8 @@ class nmeamain:
         ind=string.find(data[3],".")
         lonn=float(data[3][:(ind-2)])+float(data[3][(ind-2):])/60
         datastatus=data[6]
-        self.nmeadict[key][0]=utc
-##        arcpy.AddMessage(utc)
-        self.nmeadict[key][1]=latt
-        self.nmeadict[key][2]=lonn
-        self.nmeadict[key][12]=datastatus
+        query="""update nmea2GGA set lat="""+str(latt)+""",lon="""+str(lonn)+""",datastatus='"""+str(datastatus)+"""' where utc='"""+utc+"""';"""
+        return query
 
 
     def main(self):
@@ -152,12 +124,27 @@ class nmeamain:
             arcpy.AddMessage(os.getcwd())
     ##    for line in nmeafile:
     ##        arcpy.AddMessage(line)
-            self.nmeaDict(nmeafile)
+            try:
+##                self.connectionObject=db.connect('C:\Users\Maciek\Documents\GIG\magisterka\STD Oszczak\praca_mag\dbnmea.sqlite')
+                self.connectionObject=db.connect(':memory:')
+            #QMessageBox.critical(self.iface.mainWindow(), 'info', 'connected to database')
+            except:
+                 arcpy.AddError("could not connect to database")
+
+
+            cur=self.connectionObject.cursor()
+            qu="CREATE TABLE nmea2GGA(utc datetime primary key, lat real,lon real, fixstatus integer, numsv integer, hdop real, msl real, geoid real,speed real, datastatus text)"
+            cur.execute(qu)
+            self.connectionObject.commit()
+
+            self.nmeaDict(nmeafile,self.connectionObject)
             self.addLayer()
         except arcpy.ExecuteError:
             arcpy.AddError(arcpy.GetMessages(2))
         except Exception as e:
             arcpy.AddError(e.args[0])
+
+
 
 if __name__ == '__main__':
     nmea=nmeamain()
